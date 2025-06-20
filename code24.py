@@ -129,9 +129,9 @@ async def monitor_codespaces_job(context: ContextTypes.DEFAULT_TYPE):
             await check_and_report_codespaces(user_id, chat_id, github_token, context)
 
 def main():
-    telegram_token = os.environ.get("7788865701:AAH0RXiPO73BtQuRWzieAdhs2nQerscAvk0")
+    telegram_token = "7788865701:AAH0RXiPO73BtQuRWzieAdhs2nQerscAvk0"  # your real token here
     if not telegram_token:
-        print("Error: TELEGRAM_TOKEN env variable not set.")
+        print("Error: Telegram token is empty.")
         return
 
     app = ApplicationBuilder().token(telegram_token).build()
