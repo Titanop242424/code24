@@ -1,6 +1,6 @@
+import asyncio
 import json
 import os
-import asyncio
 import requests
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
@@ -17,6 +17,51 @@ def save_tokens(data):
     with open(TOKENS_FILE, "w") as f:
         json.dump(data, f, indent=2)
 
+async def check_and_report_codespaces(user_id, chat_id, github_token, context):
+    headers = {
+        "Authorization": f"token {github_token}",
+        "Accept": "application/vnd.github+json"
+    }
+    try:
+        resp = requests.get("https://api.github.com/user/codespaces", headers=headers, timeout=15)
+        if resp.status_code != 200:
+            await context.bot.send_message(chat_id, f"❗ Failed to get Codespaces: HTTP {resp.status_code}")
+            return
+        codespaces = resp.json().get("codespaces", [])
+        if not codespaces:
+            await context.bot.send_message(chat_id, "ℹ️ No Codespaces found for your account.")
+            return
+
+        for cs in codespaces:
+            name = cs.get("name")
+            state = cs.get("state") or cs.get("status") or "UNKNOWN"
+            msg = f"🔍 Codespace: *{name}*\nStatus: *{state}*"
+            await context.bot.send_message(chat_id, msg, parse_mode="Markdown")
+
+            if state.lower() not in ("available", "running"):
+                await context.bot.send_message(chat_id, "⚠️ Not running. Attempting restart...")
+                restart_url = f"https://api.github.com/user/codespaces/{name}/start"
+                restart_resp = requests.post(restart_url, headers=headers, timeout=10)
+                if restart_resp.status_code == 204:
+                    await context.bot.send_message(chat_id, "✅ Restart succeeded.")
+                else:
+                    await context.bot.send_message(chat_id, f"❌ Restart failed: HTTP {restart_resp.status_code}")
+    except Exception as e:
+        await context.bot.send_message(chat_id, f"❗ Error checking Codespaces: {str(e)}")
+
+async def monitor_codespaces_periodically(app):
+    while True:
+        tokens = load_tokens()
+        for user_id, data in tokens.items():
+            github_token = data.get("github_token")
+            chat_id = data.get("chat_id")
+            if github_token and chat_id:
+                try:
+                    await check_and_report_codespaces(user_id, chat_id, github_token, app)
+                except Exception as e:
+                    print(f"Error monitoring codespaces for user {user_id}: {e}")
+        await asyncio.sleep(300)  # 5 minutes
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "🤖 *Codespace Monitor Bot*\n\n"
@@ -25,7 +70,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/token <GitHub_token> - Save your GitHub token\n"
         "/check - List saved tokens and GitHub usernames\n"
         "/status - Check your Codespaces status immediately\n\n"
-        "This bot will check your Codespaces every 5 minutes and restart any shutdown ones."
+        "This bot checks Codespaces every 5 minutes and restarts shutdown ones."
     )
     await update.message.reply_text(text, parse_mode="Markdown")
 
@@ -86,53 +131,8 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await check_and_report_codespaces(user_id, chat_id, github_token, context)
 
-async def check_and_report_codespaces(user_id, chat_id, github_token, context):
-    headers = {
-        "Authorization": f"token {github_token}",
-        "Accept": "application/vnd.github+json"
-    }
-    try:
-        resp = requests.get("https://api.github.com/user/codespaces", headers=headers, timeout=15)
-        if resp.status_code != 200:
-            await context.bot.send_message(chat_id, f"❗ Failed to get Codespaces: HTTP {resp.status_code}")
-            return
-        codespaces = resp.json().get("codespaces", [])
-        if not codespaces:
-            await context.bot.send_message(chat_id, "ℹ️ No Codespaces found for your account.")
-            return
-
-        for cs in codespaces:
-            name = cs.get("name")
-            state = cs.get("state") or cs.get("status") or "UNKNOWN"
-            msg = f"🔍 Codespace: *{name}*\nStatus: *{state}*"
-            await context.bot.send_message(chat_id, msg, parse_mode="Markdown")
-
-            if state.lower() != "available" and state.lower() != "running":
-                await context.bot.send_message(chat_id, "⚠️ Not running. Attempting restart...")
-                restart_url = cs.get("url") + "/stop"  # We'll fix below
-                # The GitHub API restart endpoint:
-                restart_url = f"https://api.github.com/user/codespaces/{name}/start"
-                restart_resp = requests.post(restart_url, headers=headers, timeout=10)
-                if restart_resp.status_code == 204:
-                    await context.bot.send_message(chat_id, "✅ Restart succeeded.")
-                else:
-                    await context.bot.send_message(chat_id, f"❌ Restart failed: HTTP {restart_resp.status_code}")
-    except Exception as e:
-        await context.bot.send_message(chat_id, f"❗ Error checking Codespaces: {str(e)}")
-
-async def monitor_codespaces_job(context: ContextTypes.DEFAULT_TYPE):
-    tokens = load_tokens()
-    for user_id, data in tokens.items():
-        github_token = data.get("github_token")
-        chat_id = data.get("chat_id")
-        if github_token and chat_id:
-            await check_and_report_codespaces(user_id, chat_id, github_token, context)
-
 def main():
-    telegram_token = "7788865701:AAH0RXiPO73BtQuRWzieAdhs2nQerscAvk0"  # your real token here
-    if not telegram_token:
-        print("Error: Telegram token is empty.")
-        return
+    telegram_token = "7788865701:AAH0RXiPO73BtQuRWzieAdhs2nQerscAvk0"  # hardcode your token here
 
     app = ApplicationBuilder().token(telegram_token).build()
 
@@ -141,10 +141,13 @@ def main():
     app.add_handler(CommandHandler("check", check_command))
     app.add_handler(CommandHandler("status", status_command))
 
-    app.job_queue.run_repeating(monitor_codespaces_job, interval=300, first=0)
+    async def runner():
+        await asyncio.gather(
+            app.run_polling(),
+            monitor_codespaces_periodically(app),
+        )
 
-    print("🤖 Bot started...")
-    app.run_polling()
+    asyncio.run(runner())
 
 if __name__ == "__main__":
     main()
