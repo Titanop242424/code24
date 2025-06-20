@@ -1,5 +1,8 @@
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from telegram import Update
+import sys
+
+print("Python version:", sys.version)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Hello!")
