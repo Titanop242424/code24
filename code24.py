@@ -195,7 +195,7 @@ If you have any questions, just ask!
 
 
 def main():
-    telegram_token = "7788865701:AAH0RXiPO73BtQuRWzieAdhs2nQerscAvk0"  # Replace with your bot token
+    telegram_token = "7788865701:AAHFVFbSdhpRuMTmLj987J8BmwKLR3j4brk"  # Replace with your bot token
 
     app = ApplicationBuilder().token(telegram_token).build()
 
