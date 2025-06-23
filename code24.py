@@ -7,7 +7,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 TOKEN_FILE = 'tokens.json'
 PORT = int(os.environ.get('PORT', 10000))
-TELEGRAM_TOKEN = os.environ.get('7788865701:AAHFVFbSdhpRuMTmLj987J8BmwKLR3j4brk', 'your_default_bot_token_here')
+TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN', '7788865701:AAHFVFbSdhpRuMTmLj987J8BmwKLR3j4brk')
 SCRIPT_NAME = "your_script.sh"  # Change to your actual script name
 
 def load_tokens():
