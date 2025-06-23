@@ -3,6 +3,8 @@ import os
 import requests
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from flask import Flask
+import threading
 
 TOKEN_FILE = 'tokens.json'
 
@@ -194,22 +196,38 @@ If you have any questions, just ask!
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
 
+def run_flask():
+    app = Flask(__name__)
+
+    @app.route('/')
+    def home():
+        return "🤖 Bot is running!"
+
+    port = int(os.environ.get("PORT", 10000))  # Render will inject PORT
+    app.run(host="0.0.0.0", port=port)
+
 def main():
-    telegram_token = "7788865701:AAHFVFbSdhpRuMTmLj987J8BmwKLR3j4brk"  # Replace with your bot token
+    telegram_token = "7788865701:AAHFVFbSdhpRuMTmLj987J8BmwKLR3j4brk"
 
-    app = ApplicationBuilder().token(telegram_token).build()
+    application = ApplicationBuilder().token(telegram_token).build()
 
-    app.add_handler(CommandHandler("start", start_command))
-    app.add_handler(CommandHandler("token", token_command))
-    app.add_handler(CommandHandler("check", check_command))
-    app.add_handler(CommandHandler("status", status_command))
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("token", token_command))
+    application.add_handler(CommandHandler("check", check_command))
+    application.add_handler(CommandHandler("status", status_command))
 
-    # Schedule monitoring job every 5 minutes, starting immediately
-    app.job_queue.run_repeating(monitor_codespaces_job, interval=300, first=0)
+    if application.job_queue:
+        application.job_queue.run_repeating(monitor_codespaces_job, interval=300, first=0)
+    else:
+        print("⚠️ JobQueue not available")
 
-    print("🤖 Bot started...")
-    app.run_polling()
+    print("🤖 Telegram bot started...")
 
+    # Run Flask server in another thread
+    threading.Thread(target=run_flask).start()
+
+    # Run the Telegram bot (polling)
+    application.run_polling()
 
 if __name__ == "__main__":
     main()
