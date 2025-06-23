@@ -196,20 +196,29 @@ If you have any questions, just ask!
 
 def main():
     telegram_token = "7788865701:AAHFVFbSdhpRuMTmLj987J8BmwKLR3j4brk"  # Replace with your bot token
-
     app = ApplicationBuilder().token(telegram_token).build()
 
+    # Add handlers
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("token", token_command))
     app.add_handler(CommandHandler("check", check_command))
     app.add_handler(CommandHandler("status", status_command))
 
-    # Schedule monitoring job every 5 minutes, starting immediately
-    app.job_queue.run_repeating(monitor_codespaces_job, interval=300, first=0)
-
-    print("🤖 Bot started...")
-    app.run_polling()
-
-
-if __name__ == "__main__":
-    main()
+    # Webhook configuration for Render
+    if os.getenv('RENDER'):
+        # Get Render external URL
+        render_external_url = os.getenv('RENDER_EXTERNAL_URL')
+        if not render_external_url:
+            raise ValueError("RENDER_EXTERNAL_URL environment variable not set")
+        
+        # Set webhook
+        app.run_webhook(
+            listen="0.0.0.0",
+            port=10000,
+            url_path=telegram_token,
+            webhook_url=f"{render_external_url}/{telegram_token}"
+        )
+    else:
+        # Local development with polling
+        print("🤖 Bot started in polling mode...")
+        app.run_polling()
