@@ -208,13 +208,19 @@ If you have any questions, just ask!
 
 
 def main():
-    # Start health check server in a separate thread
-    health_check_thread = threading.Thread(target=run_health_check_server)
-    health_check_thread.daemon = True
+    # Start health check server FIRST
+    health_check_thread = threading.Thread(target=run_health_check_server, daemon=True)
     health_check_thread.start()
+    
+    # Verify server is running (optional)
+    try:
+        response = requests.get('http://localhost:10000', timeout=1)
+        print(f"Health check server running: {response.status_code == 200}")
+    except:
+        print("Health check server not responding")
 
+    # Then start the bot
     telegram_token = "7788865701:AAHFVFbSdhpRuMTmLj987J8BmwKLR3j4brk"  # Replace with your bot token
-
     app = ApplicationBuilder().token(telegram_token).build()
 
     app.add_handler(CommandHandler("start", start_command))
