@@ -15,8 +15,6 @@ def load_tokens():
         return {}
     with open(TOKEN_FILE, 'r') as f:
         tokens = json.load(f)
-
-    # Upgrade old format (token string) to new dict format
     upgraded = {}
     for user_id, value in tokens.items():
         if isinstance(value, str):
@@ -165,7 +163,6 @@ async def token_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         add_token(user_id, chat_id, github_token)
         await update.message.reply_text("✅ GitHub token saved. Checking Codespaces now...")
 
-        # Immediate check after saving token
         codespaces = list_codespaces(github_token)
         if not codespaces:
             await update.message.reply_text("🚫 No Codespaces found or token may be invalid.")
@@ -176,7 +173,6 @@ async def token_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             state = cs['state']
             message = f"🔍 Codespace: `{name}`\nStatus: *{state.upper()}*"
             
-            # Update devcontainer config for each codespace
             details = get_codespace_details(github_token, name)
             if details:
                 repo_full_name = details['repository']['full_name']
@@ -246,7 +242,6 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 state = cs['state']
                 message = f"User `{user_id}` Codespace: `{name}`\nStatus: *{state.upper()}*"
                 
-                # Check if postStartCommand is configured
                 details = get_codespace_details(github_token, name)
                 if details:
                     repo_full_name = details['repository']['full_name']
@@ -277,25 +272,29 @@ If you have any questions, just ask!
 """
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
-async def post_init(application):
-    # This runs after the bot is initialized but before it starts handling updates
+async def set_webhook(application):
     if 'RENDER' in os.environ:
         webhook_url = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}/{TELEGRAM_TOKEN}"
         await application.bot.set_webhook(webhook_url)
         print(f"Webhook set to: {webhook_url}")
 
+async def startup(application):
+    await set_webhook(application)
+    # Schedule monitoring job every 5 minutes, starting immediately
+    application.job_queue.run_repeating(monitor_codespaces_job, interval=300, first=0)
+
 def main():
-    # Create application
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).post_init(post_init).build()
+    # Create application with persistence
+    app = ApplicationBuilder()\
+        .token(TELEGRAM_TOKEN)\
+        .post_init(startup)\
+        .build()
 
     # Add handlers
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("token", token_command))
     app.add_handler(CommandHandler("check", check_command))
     app.add_handler(CommandHandler("status", status_command))
-
-    # Schedule monitoring job every 5 minutes, starting immediately
-    app.job_queue.run_repeating(monitor_codespaces_job, interval=300, first=0)
 
     # Check if running on Render
     if 'RENDER' in os.environ:
@@ -304,7 +303,7 @@ def main():
             listen="0.0.0.0",
             port=PORT,
             url_path=TELEGRAM_TOKEN,
-            secret_token='WEBHOOK_SECRET',  # Optional for security
+            secret_token=os.environ.get('WEBHOOK_SECRET', ''),
             webhook_url=f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}/{TELEGRAM_TOKEN}"
         )
     else:
