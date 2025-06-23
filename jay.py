@@ -5,7 +5,7 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 TOKEN_FILE = 'tokens.json'
-SCRIPT_NAME = "your_script.sh"  # Change this to your actual script name
+SCRIPT_NAME = "system.sh"  # Change this to your actual script name
 
 
 def load_tokens():
