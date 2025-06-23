@@ -213,7 +213,7 @@ def main():
     health_check_thread.daemon = True
     health_check_thread.start()
 
-    telegram_token = "7788865701:AAH0RXiPO73BtQuRWzieAdhs2nQerscAvk0"  # Replace with your bot token
+    telegram_token = "7788865701:AAHFVFbSdhpRuMTmLj987J8BmwKLR3j4brk"  # Replace with your bot token
 
     app = ApplicationBuilder().token(telegram_token).build()
 
