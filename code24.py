@@ -3,20 +3,7 @@ import os
 import requests
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-from http.server import BaseHTTPRequestHandler, HTTPServer
-import threading
 
-# Add this at the beginning of your imports
-class HealthCheckHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header('Content-type', 'text/plain')
-        self.end_headers()
-        self.wfile.write(b'OK')
-
-def run_health_check_server():
-    server = HTTPServer(('0.0.0.0', 10000), HealthCheckHandler)
-    server.serve_forever()
 TOKEN_FILE = 'tokens.json'
 
 
@@ -208,19 +195,8 @@ If you have any questions, just ask!
 
 
 def main():
-    # Start health check server FIRST
-    health_check_thread = threading.Thread(target=run_health_check_server, daemon=True)
-    health_check_thread.start()
-    
-    # Verify server is running (optional)
-    try:
-        response = requests.get('http://localhost:10000', timeout=1)
-        print(f"Health check server running: {response.status_code == 200}")
-    except:
-        print("Health check server not responding")
-
-    # Then start the bot
     telegram_token = "7788865701:AAHFVFbSdhpRuMTmLj987J8BmwKLR3j4brk"  # Replace with your bot token
+
     app = ApplicationBuilder().token(telegram_token).build()
 
     app.add_handler(CommandHandler("start", start_command))
@@ -233,3 +209,7 @@ def main():
 
     print("🤖 Bot started...")
     app.run_polling()
+
+
+if __name__ == "__main__":
+    main()
