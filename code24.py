@@ -1,20 +1,32 @@
 import json
 import os
 import requests
-import asyncio
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import threading
 
+# Add this at the beginning of your imports
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(b'OK')
+
+def run_health_check_server():
+    server = HTTPServer(('0.0.0.0', 10000), HealthCheckHandler)
+    server.serve_forever()
 TOKEN_FILE = 'tokens.json'
-PORT = int(os.environ.get('PORT', 10000))
-TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN', '7788865701:AAHFVFbSdhpRuMTmLj987J8BmwKLR3j4brk')
-SCRIPT_NAME = "your_script.sh"  # Change to your actual script name
+
 
 def load_tokens():
     if not os.path.exists(TOKEN_FILE):
         return {}
     with open(TOKEN_FILE, 'r') as f:
         tokens = json.load(f)
+
+    # Upgrade old format (token string) to new dict format
     upgraded = {}
     for user_id, value in tokens.items():
         if isinstance(value, str):
@@ -26,14 +38,17 @@ def load_tokens():
             upgraded[user_id] = value
     return upgraded
 
+
 def save_tokens(tokens):
     with open(TOKEN_FILE, 'w') as f:
         json.dump(tokens, f)
+
 
 def add_token(user_id, chat_id, github_token):
     tokens = load_tokens()
     tokens[str(user_id)] = {"chat_id": chat_id, "github_token": github_token}
     save_tokens(tokens)
+
 
 def list_codespaces(github_token):
     headers = {
@@ -45,81 +60,12 @@ def list_codespaces(github_token):
         return response.json().get('codespaces', [])
     return []
 
-def get_codespace_details(github_token, codespace_name):
-    headers = {
-        "Authorization": f"token {github_token}",
-        "Accept": "application/vnd.github+json"
-    }
-    url = f"https://api.github.com/user/codespaces/{codespace_name}"
-    response = requests.get(url, headers=headers)
-    if response.status_code == 200:
-        return response.json()
-    return None
-
-def update_devcontainer_config(github_token, codespace_name, repo_full_name, devcontainer_path=".devcontainer/devcontainer.json"):
-    headers = {
-        "Authorization": f"token {github_token}",
-        "Accept": "application/vnd.github+json"
-    }
-    
-    # Get the current devcontainer.json content
-    content_url = f"https://api.github.com/repos/{repo_full_name}/contents/{devcontainer_path}"
-    response = requests.get(content_url, headers=headers)
-    
-    if response.status_code != 200:
-        print(f"Could not fetch devcontainer.json: {response.status_code} {response.text}")
-        return False
-    
-    content_data = response.json()
-    current_content = content_data.get('content', '')
-    current_sha = content_data.get('sha', '')
-    
-    import base64
-    try:
-        current_config = json.loads(base64.b64decode(current_content).decode('utf-8'))
-    except:
-        current_config = {}
-    
-    # Update the postStartCommand
-    if 'postStartCommand' not in current_config:
-        current_config['postStartCommand'] = f"bash {SCRIPT_NAME}"
-    elif isinstance(current_config['postStartCommand'], str):
-        if SCRIPT_NAME not in current_config['postStartCommand']:
-            current_config['postStartCommand'] += f" && bash {SCRIPT_NAME}"
-    elif isinstance(current_config['postStartCommand'], list):
-        if f"bash {SCRIPT_NAME}" not in current_config['postStartCommand']:
-            current_config['postStartCommand'].append(f"bash {SCRIPT_NAME}")
-    
-    # Prepare the update
-    updated_content = json.dumps(current_config, indent=2)
-    update_data = {
-        "message": f"Update devcontainer.json for {codespace_name}",
-        "content": base64.b64encode(updated_content.encode('utf-8')).decode('utf-8'),
-        "sha": current_sha
-    }
-    
-    # Push the update
-    update_response = requests.put(content_url, headers=headers, json=update_data)
-    if update_response.status_code == 200:
-        print(f"Successfully updated devcontainer.json for {codespace_name}")
-        return True
-    else:
-        print(f"Failed to update devcontainer.json: {update_response.status_code} {update_response.text}")
-        return False
 
 def restart_codespace(github_token, name):
     headers = {
         "Authorization": f"token {github_token}",
         "Accept": "application/vnd.github+json"
     }
-    
-    # First get codespace details to update devcontainer config
-    details = get_codespace_details(github_token, name)
-    if details:
-        repo_full_name = details['repository']['full_name']
-        update_devcontainer_config(github_token, name, repo_full_name)
-    
-    # Then restart the codespace
     url = f"https://api.github.com/user/codespaces/{name}/start"
     response = requests.post(url, headers=headers, json={})
     if response.status_code == 202:
@@ -128,6 +74,7 @@ def restart_codespace(github_token, name):
     else:
         print(f"Failed to restart codespace {name}: {response.status_code} {response.text}")
         return False, f"{response.status_code} {response.text}"
+
 
 async def monitor_codespaces_job(context: ContextTypes.DEFAULT_TYPE):
     tokens = load_tokens()
@@ -155,6 +102,7 @@ async def monitor_codespaces_job(context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             await context.bot.send_message(chat_id, f"❗ Error checking Codespaces: {e}")
 
+
 async def token_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
@@ -163,22 +111,15 @@ async def token_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         add_token(user_id, chat_id, github_token)
         await update.message.reply_text("✅ GitHub token saved. Checking Codespaces now...")
 
+        # Immediate check after saving token
         codespaces = list_codespaces(github_token)
         if not codespaces:
             await update.message.reply_text("🚫 No Codespaces found or token may be invalid.")
             return
-        
         for cs in codespaces:
             name = cs['name']
             state = cs['state']
             message = f"🔍 Codespace: `{name}`\nStatus: *{state.upper()}*"
-            
-            details = get_codespace_details(github_token, name)
-            if details:
-                repo_full_name = details['repository']['full_name']
-                if update_devcontainer_config(github_token, name, repo_full_name):
-                    message += f"\n🔄 Updated devcontainer.json to run `{SCRIPT_NAME}` on start"
-            
             if state.lower() != 'available':
                 message += "\n⚠️ Not running. Attempting restart..."
                 restarted, error = restart_codespace(github_token, name)
@@ -186,10 +127,10 @@ async def token_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     message += "\n✅ Restart initiated."
                 else:
                     message += f"\n❌ Restart failed.\nError: {error}"
-            
             await update.message.reply_text(message, parse_mode='Markdown')
     else:
         await update.message.reply_text("Usage:\n/token <your_github_token>")
+
 
 async def check_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tokens = load_tokens()
@@ -221,6 +162,8 @@ async def check_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(msg, parse_mode='Markdown')
 
+
+
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tokens = load_tokens()
     if not tokens:
@@ -241,16 +184,10 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 name = cs['name']
                 state = cs['state']
                 message = f"User `{user_id}` Codespace: `{name}`\nStatus: *{state.upper()}*"
-                
-                details = get_codespace_details(github_token, name)
-                if details:
-                    repo_full_name = details['repository']['full_name']
-                    message += f"\nRepository: {repo_full_name}"
-                    message += f"\nPost-start script: `{SCRIPT_NAME}` (auto-configured)"
-                
                 await update.message.reply_text(message, parse_mode='Markdown')
         except Exception as e:
             await update.message.reply_text(f"User `{user_id}`: ❗ Error checking Codespaces: {e}", parse_mode='Markdown')
+
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = """
@@ -263,52 +200,30 @@ Here are the available commands:
 • `/status` — Check Codespaces status immediately for all saved tokens.
 • `/start` — Show this help message.
 
-_The bot automatically:_
-1. Checks your Codespaces every 5 minutes
-2. Restarts any that are shutdown
-3. Configures them to run `your_script.sh` on startup
+_The bot automatically checks your Codespaces every 5 minutes and restarts any that are shutdown._
 
 If you have any questions, just ask!
 """
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
-async def set_webhook(application):
-    if 'RENDER' in os.environ:
-        webhook_url = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}/{TELEGRAM_TOKEN}"
-        await application.bot.set_webhook(webhook_url)
-        print(f"Webhook set to: {webhook_url}")
-
-async def startup(application):
-    await set_webhook(application)
-    # Schedule monitoring job every 5 minutes, starting immediately
-    application.job_queue.run_repeating(monitor_codespaces_job, interval=300, first=0)
 
 def main():
-    # Create application with persistence
-    app = ApplicationBuilder()\
-        .token(TELEGRAM_TOKEN)\
-        .post_init(startup)\
-        .build()
+    # Start health check server in a separate thread
+    health_check_thread = threading.Thread(target=run_health_check_server)
+    health_check_thread.daemon = True
+    health_check_thread.start()
 
-    # Add handlers
+    telegram_token = "7788865701:AAH0RXiPO73BtQuRWzieAdhs2nQerscAvk0"  # Replace with your bot token
+
+    app = ApplicationBuilder().token(telegram_token).build()
+
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("token", token_command))
     app.add_handler(CommandHandler("check", check_command))
     app.add_handler(CommandHandler("status", status_command))
 
-    # Check if running on Render
-    if 'RENDER' in os.environ:
-        print("🤖 Bot starting in webhook mode...")
-        app.run_webhook(
-            listen="0.0.0.0",
-            port=PORT,
-            url_path=TELEGRAM_TOKEN,
-            secret_token=os.environ.get('WEBHOOK_SECRET', ''),
-            webhook_url=f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}/{TELEGRAM_TOKEN}"
-        )
-    else:
-        print("🤖 Bot starting in polling mode...")
-        app.run_polling()
+    # Schedule monitoring job every 5 minutes, starting immediately
+    app.job_queue.run_repeating(monitor_codespaces_job, interval=300, first=0)
 
-if __name__ == "__main__":
-    asyncio.run(main())
+    print("🤖 Bot started...")
+    app.run_polling()
